@@ -147,14 +147,17 @@ use fs_extra::dir;
 use cov::{self, Gcov, Graph, Interner, Report, Symbol};
 use serde_json::Value;
 use tera::{Context, Tera};
+use coveralls_api::{Identity, Service, CoverallsReport, CiService, Source};
 
+use std::env;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{File, create_dir_all, read_dir};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Entry point of `cargo cov report` subcommand. Renders the coverage report using a template.
-pub fn generate(config: &ReportConfig) -> Result<Option<PathBuf>> {
+pub fn generate(config: &ReportConfig, coveralls: bool) -> Result<Option<PathBuf>> {
     let report_path = &config.output_path;
     clean_dir(report_path).chain_err(|| "Cannot clean report directory")?;
     create_dir_all(report_path)?;
@@ -162,6 +165,39 @@ pub fn generate(config: &ReportConfig) -> Result<Option<PathBuf>> {
     let mut interner = Interner::new();
     let graph = create_graph(config, &mut interner).chain_err(|| "Cannot create graph")?;
     let report = graph.report();
+
+    if coveralls {
+        let mut coveralls_report =
+            CoverallsReport::new(
+                Identity::ServiceToken(
+                    Service {
+                        service_name: CiService::Travis,
+                        service_job_id: env::var("TRAVIS_JOB_ID").chain_err(|| "not running on travis-ci")?
+                    })
+            );
+
+        for (&symbol, file) in report.files.iter() {
+            let path = Path::new(&interner[symbol]);
+            if path.is_absolute() || !path.exists() {
+                continue;
+            }
+
+            let mut lines : HashMap<usize,usize> = HashMap::new();
+
+            for (key, value) in file.lines.iter() {
+                lines.insert(*key as usize, value.count as usize);
+            }
+
+            coveralls_report.add_source(
+                Source::new(&path,
+                            &path.canonicalize()?.as_path(),
+                            &lines,
+                            &None,
+                            false)?);
+            coveralls_report.send_to_coveralls().chain_err(|| "failed to send report to coveralls");
+        }
+
+    }
 
     render(config, &report, &interner).chain_err(|| "Cannot render report")
 }

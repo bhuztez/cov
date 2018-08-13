@@ -40,6 +40,7 @@ extern crate tera;
 extern crate termcolor;
 extern crate toml;
 extern crate walkdir;
+extern crate coveralls_api;
 
 #[macro_use]
 mod ui;
@@ -172,6 +173,7 @@ Subcommands:
                 (about: "Generates a coverage report")
                 (@arg template: --template [TEMPLATE] "Report template, default to 'html'")
                 (@arg open: --open "Open the report in browser after it is generated")
+                (@arg coveralls: --coveralls "send report in browser to coveralls")
                 (@arg include: --include [TYPES]... +use_delimiter possible_values(&[
                     "local",
                     "macros",
@@ -194,7 +196,7 @@ Subcommands:
 /// [`report::generate()`]: report/fn.generate.html
 fn generate_reports(cargo: Result<Cargo>, matches: &ArgMatches) -> Result<()> {
     let report_config = ReportConfig::parse(matches, cargo.map(Cargo::into_cov_build_path))?;
-    let open_path = report::generate(&report_config)?;
+    let open_path = report::generate(&report_config, matches.is_present("coveralls"))?;
     if matches.is_present("open") {
         if let Some(path) = open_path {
             progress!("Opening", "{}", path.display());
